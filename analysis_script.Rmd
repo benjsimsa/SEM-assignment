@@ -220,7 +220,8 @@ fitMeasures(measurement_fit, c("chisq", "df", "pvalue", "cfi", "rmsea", "srmr", 
 ```
 
 
-### Modify the  model
+### Modify the  model (drawing from theoretical considerations and modification indices)
+
 ```{r Modification indices}
 mi_measurement <- modificationIndices(measurement_fit)
 (mi_measurement_sorted <- mi_measurement[order(-mi_measurement$mi),])
@@ -239,16 +240,12 @@ fit_measurement_mod <- cfa(measurement_model_mod,
               missing = "direct"
 )
 
+
+# Get summary, fit measures and parameter estimates 
+
 summary(fit_measurement_mod)
 
 fitMeasures(fit_measurement_mod, c("chisq", "df", "pvalue", "cfi", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "srmr"), output = "matrix")
-
-parameters_measurement = as.data.frame(parameterEstimates(fit_measurement_mod))
-parameters_measurement = parameters_measurement %>% mutate(across(where(is.numeric), ~ round(., 3)))
-
-write.table(parameters_measurement,
-            "parameters_measurement.csv",
-            sep = ",")
 
 
 parameters_measurement_std = as.data.frame(parameterEstimates(fit_measurement_mod,
@@ -256,9 +253,9 @@ parameters_measurement_std = as.data.frame(parameterEstimates(fit_measurement_mo
 
 parameters_measurement_std = parameters_measurement_std %>% mutate(across(where(is.numeric), ~ round(., 3)))
 
-write.table(parameters_measurement_std,
-            "parameters_measurement_std.csv",
-            sep = ",")
+# write.table(parameters_measurement_std,
+#            "parameters_measurement_std.csv",
+#            sep = ",")
 
 ```
 
@@ -267,26 +264,13 @@ The model has acceptable fit according to the pre-set cut-off values.
 All standardized factors loadings are above 0.50.
 
 
-### Estimate in-sample reliability of Social trust and Trust in institutions using McDonald's Omega TODO! 
-```{r}
-data_inst = data_filtered %>% 
-  select(trstprt, trstplt, trstplc, trstlgl)
-
-data_soc = data_filtered %>% 
-  select(ppltrst, pplfair, pplhlp)
-
-alpha(data_inst)
-alpha(data_soc)
-```
-
 
 ## Measurement invariance: Trust in institutions
 
-Let us consider measurement invariance of trust in institutions between CEE / Western countries
+Let us assess measurement invariance of trust in institutions between CEE / Western countries
 
 
-
-```{r}
+```{r message = FALSE, warning = FALSE}
 # Measurement model for institutional trust 
 inst_model_mod <- 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
                       trstplt ~~ trstprt'
@@ -362,11 +346,11 @@ inst_model_mod <- 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
   
   rownames(table_fit) <- c("Configural", "Metric", "Scalar", "Strict", "Structural")
   table_fit = as.data.frame(table_fit)
-  table_fit = table_fit %>% mutate(across(where(is.numeric), ~ round(., 3)))
+  (table_fit = table_fit %>% mutate(across(where(is.numeric), ~ round(., 3))))
   
-  write.table(table_fit,
-              "invariance_fit.csv",
-              sep = ",")
+#  write.table(table_fit,
+#              "invariance_fit.csv",
+#              sep = ",")
   
   table_anova <- list(anova(fit_inst_con, fit_inst_met),
                       anova(fit_inst_met, fit_inst_sca),
@@ -377,19 +361,24 @@ inst_model_mod <- 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
     .[-c(3, 5, 7),]
   
   table_anova
-  table_anova = as.data.frame(table_anova)
-  table_anova = table_anova %>% mutate(across(where(is.numeric), ~ round(., 3)))
-  write.table(table_anova,
-              "chisq_fit.csv",
-              sep = ",")
+  
+#  table_anova = as.data.frame(table_anova)
+#  table_anova = table_anova %>% mutate(across(where(is.numeric), ~ round(., 3)))
+#  write.table(table_anova,
+#              "chisq_fit.csv",
+#              sep = ",")
 ```
-Chi-square test results: metric measurement invariance not achieved 
-Results using Chen's (2007) cut-off values: Structural variance was achieved.
+Chi-square test results: metric measurement invariance rejected 
 
-Still, we can see whether we can achieve at least partial structural invariance using the chi-square test 
+Results using Chen's (2007) cut-off values: scalar invariance not rejected 
+
+
+Still, we can see whether we can achieve at least partial structural invariance using the chi-square test by releasing the constraints for factor loadings, parameter-by-parameter  
 
 
 ## Partial measurement invariance: Trust in institutions 
+
+
 ```{r }
 lavTestScore(fit_inst_met)
 parTable(fit_inst_met)
@@ -431,7 +420,7 @@ Partial metric invariance (according to chi-square test) was not established.
 
 
 
-```{r }
+```{r warning = FALSE, message = FALSE}
 fit_inst_sca <- cfa(inst_model_mod,            
                     data = data_filtered, 
                     group = "cntry_grp",
@@ -445,7 +434,7 @@ fit_inst_sca <- cfa(inst_model_mod,
 summary(fit_inst_sca)
 ```
 
-There is a difference in latent means. 
+The latent mean of Trust in institution is lower for ECE countries than for WE. 
 
 
 # Part 4: MIMIC model 
@@ -517,7 +506,42 @@ write.table(parameters_mimic_multigroup,
 ```
 
 
-# Part X: Plot them models 
+# Part 5: Plot the models 
+
+## Modified measurement model 
+
+```{r }
+
+lay_measurement = get_layout("trstlgl", "trstplt", "trstprt", "trstplc", "", 
+                             "", "trust_inst", "", "trust_soc", "",
+                             "", "", "ppltrst", "pplfair", "pplhlp",
+                             "", "", "", "", "",
+                             rows = 4)
+
+(measurement_plot = graph_sem(fit_measurement_mod,
+                              layout = lay_measurement,
+                              angle = 170)
+)
+
+# Save the plot 
+#library(Cairo)
+#Cairo(600, 600, file="measurement_plot.png", type="png", bg="white")
+#graph_sem(fit_measurement_mod,
+#          layout = lay_measurement,
+#          angle = 170,
+#        spacing_y = 3,
+#          text_size = 4,
+#          ellipses_width = 1,
+#          ellipses_height = 1)
+#dev.off() 
+
+
+
+```
+
+
+
+## MIMIC model 
 
 ```{r }
 
@@ -528,26 +552,26 @@ lay <- get_layout("happy", "gndr", "hinctnta", "", "ppltrst",
                   rows = 3)
 
 
-mimic_plot = graph_sem(mimic_fit,
+(mimic_plot = graph_sem(mimic_fit,
           layout = lay,
           angle = 170,
           spacing_y = 3,
           text_size = 4,
           ellipses_width = 1,
-          ellipses_height = 1.5)
+          ellipses_height = 1))
 
 
 # Save the plot 
 # library(Cairo)
-Cairo(600, 600, file="mimic_plot.png", type="png", bg="white")
-graph_sem(mimic_fit,
-          layout = lay,
-          angle = 170,
-          spacing_y = 3,
-          text_size = 4,
-          ellipses_width = 1,
-          ellipses_height = 1.5)
-dev.off() 
+#Cairo(600, 600, file="mimic_plot.png", type="png", bg="white")
+#graph_sem(mimic_fit,
+#          layout = lay,
+#          angle = 170,
+#          spacing_y = 3,
+#          text_size = 4,
+#          ellipses_width = 1,
+#          ellipses_height = 1.5)
+#dev.off() 
 
 
 
