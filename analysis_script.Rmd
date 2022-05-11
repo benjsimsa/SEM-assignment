@@ -2,9 +2,7 @@
 title: "SEM_final_project"
 author: "Benjamin Šimsa"
 date: "5/5/2022"
-output: 
-  prettydoc::html_pretty:
-    theme: architect
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
