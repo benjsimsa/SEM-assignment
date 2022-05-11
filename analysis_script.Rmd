@@ -1,0 +1,554 @@
+---
+title: "SEM_final_project"
+author: "Benjamin Šimsa"
+date: "5/5/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This script is a part of the final assignment for the Structural Equations course at KU Leuven, academic year 2021/2022. Lecturers: Prof. Bart Meuleman and Alberto Stefanelli. 
+
+Acknowledgment: Large portions of the following code were adapted from scripts written by Alberto Stefanelli; https://albertostefanelli.github.io/SEM_labs/
+
+
+# Part 1: Preliminaries and Descriptives
+
+Import the packages, install if necessary 
+
+```{r silent = TRUE}
+packages <-lapply (c('tidyverse', 
+                     'lavaan', 
+                     'psych',
+                     'gridExtra',
+                     'mvnTest',
+                     'semTools',
+                     'tidySEM',
+                     'haven',
+                     'ggpubr'), 
+        FUN = function (x) {
+          if (! require (x, character.only = T)) {
+            install.packages(x, dependencies = T)
+            library(x, character.only = T)
+          }
+        }
+        )
+
+```
+
+
+Import data
+
+```{r }
+data = read.csv('https://raw.githubusercontent.com/benjsimsa/SEM-assignment/main/ess_data.csv')
+```
+
+## Data processing 
+
+1) Add a factor that tells us whether the country belongs to the Eastern/Central Europe (CEE) or Western Europe (WE) group
+2) Transform missing data to NAs 
+
+```{r}
+data_filtered = data %>%  
+  mutate(cntry_grp = case_when(
+    cntry %in% 
+      c("BE", "DE", "FI", "FR", "DK", "GR", "IR", "NO", "NE", "PO", "ES", "CH", "UK", "SE") ~ "WE",
+    cntry %in% c("BG", "CZ", "EE", "HR", "PL", "SI", "SK") ~ "CEE"
+                               )) %>%
+  filter(cntry_grp != is.na(cntry_grp)) %>% 
+  mutate_all(~na_if(., 66)) %>%  # Transforming missing values to NAs 
+  mutate_all(~na_if(., 77)) %>% 
+  mutate_all(~na_if(., 88)) %>% 
+  mutate_all(~na_if(., 99)) %>% 
+  dplyr:::mutate(gndr = na_if(gndr, 9)) # Convert gender non-response to NAs 
+
+data_filtered$cntry_grp = as.factor(data_filtered$cntry_grp)
+```
+
+
+## Descriptives
+
+Get a table with numbers of participants for each country and country group: 
+
+```{r }
+(cntry_samplesize = table(data_filtered[, "cntry"]))
+(group_samplesize = table(data_filtered[, "cntry_grp"]))
+
+
+# save the table 
+# write.table(cntry_samplesize,
+#            "participants_countries.csv",
+#            sep = ",")
+```
+
+Get an insight into the structure of the data 
+
+```{r}
+data_full_todescribe = data_filtered %>% 
+  select(ppltrst, pplfair, pplhlp, trstprl, trstlgl, trstplc, trstplt, trstprt, happy, gndr, hinctnta)
+
+descriptive_ess <- as.data.frame(psych::describe(data_full_todescribe))
+
+(descriptive_ess <- descriptive_ess %>% select(n,
+                                 mean,
+                                 sd,
+                                 median,
+                                 min,
+                                 max,
+                                 skew,
+                                 kurtosis) %>% 
+                    mutate(across(where(is.numeric), ~ round(., 1))))
+
+
+# save the table 
+
+#write.table(descriptive_ess,
+#            "descriptives.csv",
+#            sep = ",")
+```
+
+## How many **missing datapoints** for each variable / country group 
+
+```{r }
+data_w = data_filtered %>% 
+  filter(cntry_grp == "WE") %>%
+  select(ppltrst, pplfair, pplhlp, trstprl, trstlgl, trstplc, trstplt, trstprt, happy, gndr, hinctnta)
+  
+data_cee = data_filtered %>% 
+  filter(cntry_grp == "CEE") %>%
+  select(ppltrst, pplfair, pplhlp, trstprl, trstlgl, trstplc, trstplt, trstprt, happy, gndr, hinctnta)
+
+data_full_na = data_filtered %>% 
+  select(ppltrst, pplfair, pplhlp, trstprl, trstlgl, trstplc, trstplt, trstprt, happy, gndr, hinctnta)
+
+na_count_w = sapply(data_w, function(y) sum(length(which(is.na(y)))))
+na_count_ce = sapply(data_cee, function(y) sum(length(which(is.na(y)))))
+na_count_total = sapply(data_full_na, function(y) sum(length(which(is.na(y)))))
+
+na_count_w = data.frame(na_count_w)
+na_count_ce = data.frame(na_count_ce)
+na_count_total = data.frame(na_count_total)
+
+(missing_table = cbind(na_count_w, na_count_ce, na_count_total))
+
+(missing_table = missing_table %>% mutate(
+  na_perc_w = (na_count_w/nrow(data_w))*100,
+  na_perc_cee = na_count_ce/nrow(data_cee)*100,
+  na_perc_total = na_count_total/nrow(data_full_na)*100
+) %>%
+  mutate(across(where(is.numeric), ~ round(., 1)))
+  %>% 
+  relocate(na_count_w, na_perc_w, na_count_ce, na_perc_cee, na_count_total, na_perc_total)
+  )
+
+# export the table to csv 
+#write.table(missing_table, 
+#            "na_table.csv",
+#            sep = ",")
+
+```
+
+
+## Assumption check: Multivariate normality
+
+Plot each variable to visually assess univariate normality 
+
+```{r silent = TRUE}
+lgl_plot <- ggplot(data_filtered, aes(trstlgl)) +
+        geom_blank() +
+        geom_histogram(aes(y = ..density..), binwidth = 1, colour = "black", alpha=0.3) + theme_minimal() + xlab("Trust in legal system")
+
+plc_plot <- ggplot(data_filtered, aes(trstplc)) +
+        geom_blank() +
+        geom_histogram(aes(y = ..density..), binwidth = 1, colour = "black", alpha=0.3) + theme_minimal() + xlab("Trust in police")
+
+plt_plot <- ggplot(data_filtered, aes(trstplt)) +
+        geom_blank() +
+        geom_histogram(aes(y = ..density..), binwidth = 1, colour = "black", alpha=0.3) + theme_minimal() + xlab("Trust in politicians")
+
+prt_plot <- ggplot(data_filtered, aes(trstprt)) +
+        geom_blank() +
+        geom_histogram(aes(y = ..density..), binwidth = 1, colour = "black", alpha=0.3) + theme_minimal() + xlab("Trust in political parties")
+
+soc_trst_plot <- ggplot(data_filtered, aes(ppltrst)) +
+        geom_blank() +
+        geom_histogram(aes(y = ..density..), binwidth = 1, colour = "black", alpha=0.3) + theme_minimal()+ xlab("People can be trusted")
+
+soc_fair_plot <- ggplot(data_filtered, aes(pplfair)) +
+        geom_blank() +
+        geom_histogram(aes(y = ..density..), binwidth = 1, colour = "black", alpha=0.3) + theme_minimal()+ xlab("People are fair")
+
+soc_help_plot <- ggplot(data_filtered, aes(pplhlp)) +
+        geom_blank() +
+        geom_histogram(aes(y = ..density..), binwidth = 1, colour = "black", alpha=0.3) + theme_minimal()+ xlab("People are helpful")
+
+normality_plots = ggarrange(lgl_plot, plc_plot, plt_plot, prt_plot, soc_trst_plot, soc_fair_plot, soc_help_plot +  rremove("x.text"),
+          ncol = 3, nrow = 3)
+
+
+## Save the plots
+# ggsave("normplots.png",
+#      normality_plots)
+
+```
+
+Most of the variables appear to be highly skewed / deviate from univariate normality. 
+
+The data violate the univariate normality assumption (hence also the multivariate normality assumption). The robust ML estimator will thus be used for subsequent analyses. 
+
+
+
+# Part 2: Evaluating measurement models
+
+## Simultaneous measurement model: Trust in institutions and Social trust
+
+```{r 1F model}
+measurement_model <- 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
+                      trust_soc =~ ppltrst + pplfair + pplhlp'
+
+measurement_fit <- cfa(measurement_model,            
+              data = data_filtered, 
+              estimator = "MLR",
+              missing = 'direct'
+)
+summary(measurement_fit)
+
+fitMeasures(measurement_fit, c("chisq", "df", "pvalue", "cfi", "rmsea", "srmr", "rmsea.ci.lower", "rmsea.ci.upper"), output = "matrix")
+
+```
+
+
+### Modify the  model
+```{r Modification indices}
+mi_measurement <- modificationIndices(measurement_fit)
+(mi_measurement_sorted <- mi_measurement[order(-mi_measurement$mi),])
+```
+
+Out of the three modification suggestions with highest MI, allowing for trust in politicians and trust in political parties makes the most theoretical sense. Let us modify the model and assess model fit
+
+```{r }
+measurement_model_mod <-'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
+                        trust_soc =~ ppltrst + pplfair + pplhlp
+                        trstplt ~~ trstprt'
+
+fit_measurement_mod <- cfa(measurement_model_mod,            
+              data = data_filtered,
+              estimator = "MLR",
+              missing = "direct"
+)
+
+summary(fit_measurement_mod)
+
+fitMeasures(fit_measurement_mod, c("chisq", "df", "pvalue", "cfi", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "srmr"), output = "matrix")
+
+parameters_measurement = as.data.frame(parameterEstimates(fit_measurement_mod))
+parameters_measurement = parameters_measurement %>% mutate(across(where(is.numeric), ~ round(., 3)))
+
+write.table(parameters_measurement,
+            "parameters_measurement.csv",
+            sep = ",")
+
+
+parameters_measurement_std = as.data.frame(parameterEstimates(fit_measurement_mod,
+                                                              standardized = TRUE))
+
+parameters_measurement_std = parameters_measurement_std %>% mutate(across(where(is.numeric), ~ round(., 3)))
+
+write.table(parameters_measurement_std,
+            "parameters_measurement_std.csv",
+            sep = ",")
+
+```
+
+The model has acceptable fit according to the pre-set cut-off values. 
+
+All standardized factors loadings are above 0.50.
+
+
+### Estimate in-sample reliability of Social trust and Trust in institutions using McDonald's Omega TODO! 
+```{r}
+data_inst = data_filtered %>% 
+  select(trstprt, trstplt, trstplc, trstlgl)
+
+data_soc = data_filtered %>% 
+  select(ppltrst, pplfair, pplhlp)
+
+alpha(data_inst)
+alpha(data_soc)
+```
+
+
+## Measurement invariance: Trust in institutions
+
+Let us consider measurement invariance of trust in institutions between CEE / Western countries
+
+
+
+```{r}
+# Measurement model for institutional trust 
+inst_model_mod <- 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
+                      trstplt ~~ trstprt'
+
+
+# configural invariance
+  fit_inst_con <- cfa(inst_model_mod,            
+                    data = data_filtered, 
+                    group = "cntry_grp",
+                    estimator = "MLR",
+                    missing = "direct"
+  )
+  
+  
+  # metric 
+  
+  fit_inst_met <- cfa(inst_model_mod,            
+                    data = data_filtered, 
+                    group = "cntry_grp",
+                    group.equal = c("loadings"),
+                    estimator = "MLR",
+                    missing = "direct"
+  )
+  
+  # scalar
+  fit_inst_sca <- cfa(inst_model_mod,            
+                    data = data_filtered, 
+                    group = "cntry_grp",
+                    group.equal = c("loadings",
+                                    "intercepts"),
+                    estimator = "MLR",
+                    missing = "direct"
+  )
+  
+  # strict 
+  fit_inst_stri <- cfa(inst_model_mod,            
+                     data = data_filtered, 
+                     group = "cntry_grp",
+                     group.equal = c("loadings",
+                                     "intercepts",
+                                     "residuals"),
+                     estimator = "MLR",
+                     missing = "direct"
+  )
+  
+  # structural
+  fit_inst_stru <- cfa(inst_model_mod,            
+                     data = data_filtered, 
+                     group = "cntry_grp", 
+                     group.equal = c("loadings",
+                                     "intercepts",
+                                     "residuals", 
+                                     "lv.variances", 
+                                     "lv.covariances"),
+                     estimator = "MLR",
+                     missing = "direct"
+  )
+  
+  # compare
+  model_fit <-  function(lavobject) {
+    vars <- c("df", "cfi", "tli", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "srmr")
+    return(fitmeasures(lavobject)[vars] %>% data.frame() %>% t())
+  }
+  
+  table_fit <- 
+    list(model_fit(fit_inst_con), 
+         model_fit(fit_inst_met), 
+         model_fit(fit_inst_sca),
+         model_fit(fit_inst_stri),
+         model_fit(fit_inst_stru)) %>% 
+    reduce(rbind)
+  
+  
+  rownames(table_fit) <- c("Configural", "Metric", "Scalar", "Strict", "Structural")
+  table_fit = as.data.frame(table_fit)
+  table_fit = table_fit %>% mutate(across(where(is.numeric), ~ round(., 3)))
+  
+  write.table(table_fit,
+              "invariance_fit.csv",
+              sep = ",")
+  
+  table_anova <- list(anova(fit_inst_con, fit_inst_met),
+                      anova(fit_inst_met, fit_inst_sca),
+                      anova(fit_inst_sca, fit_inst_stri),
+                      anova(fit_inst_stri, fit_inst_stru)
+  ) %>%  
+    reduce(rbind) %>% 
+    .[-c(3, 5, 7),]
+  
+  table_anova
+  table_anova = as.data.frame(table_anova)
+  table_anova = table_anova %>% mutate(across(where(is.numeric), ~ round(., 3)))
+  write.table(table_anova,
+              "chisq_fit.csv",
+              sep = ",")
+```
+Chi-square test results: metric measurement invariance not achieved 
+Results using Chen's (2007) cut-off values: Structural variance was achieved.
+
+Still, we can see whether we can achieve at least partial structural invariance using the chi-square test 
+
+
+## Partial measurement invariance: Trust in institutions 
+```{r }
+lavTestScore(fit_inst_met)
+parTable(fit_inst_met)
+
+# We see that setting factor loading of trust in police equal across the two groups causes the most trouble 
+
+  fit_inst_met_partial <- cfa(inst_model_mod,            
+                    data = data_filtered, 
+                    group = "cntry_grp",
+                    group.equal = c("loadings"),
+                    estimator = "MLR",
+                    missing = "direct", 
+                    group.partial = c("trust_inst =~ trstplc",
+                                      "trust_inst =~ trstplt")
+  )
+
+
+  lavTestScore(fit_inst_met_partial)
+
+  
+  table_anova <- list(anova(fit_inst_con, fit_inst_met_partial),
+                      anova(fit_inst_met_partial, fit_inst_sca),
+                      anova(fit_inst_sca, fit_inst_stri),
+                      anova(fit_inst_stri, fit_inst_stru)
+  ) %>%  
+    reduce(rbind) %>% 
+    .[-c(3, 5, 7),]
+  
+  table_anova
+```
+
+Partial metric invariance (according to chi-square test) was not established. 
+
+
+
+
+
+# Part 3: Is institutional trust higher in Western Europe than in ECE? 
+
+
+
+```{r }
+fit_inst_sca <- cfa(inst_model_mod,            
+                    data = data_filtered, 
+                    group = "cntry_grp",
+                    group.equal = c("loadings",
+                                    "intercepts"),
+                    estimator = "MLR",
+                    missing = "direct",
+                    meanstructure = TRUE
+  )
+
+summary(fit_inst_sca)
+```
+
+There is a difference in latent means. 
+
+
+# Part 4: MIMIC model 
+
+
+## Base MIMIC model
+
+```{r}
+mimic_model = 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
+                        trstplt ~~ trstprt
+                        trust_soc =~ ppltrst + pplfair + pplhlp
+                        trust_inst ~ hinctnta	+ happy + gndr + trust_soc'
+
+mimic_fit <- sem(mimic_model,            
+              data = data_filtered , 
+              estimator = "MLR",
+              missing = "direct"
+)
+
+summary(mimic_fit)
+
+fitMeasures(mimic_fit, c("chisq", "df", "pvalue", "cfi", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "srmr"), output = "matrix")
+
+
+
+
+# parameter estimates 
+parameters_mimic_std = as.data.frame(parameterEstimates(mimic_fit,
+                                                    standardized = TRUE))
+parameters_mimic_std = parameters_mimic_std %>% mutate(across(where(is.numeric), ~ round(., 3)))
+
+write.table(parameters_mimic_std,
+            "parameters_mimic_std.csv",
+            sep = ",")
+
+```
+
+
+# Part 5: Interaction between predictors and CEE 
+
+```{r}
+mimic_model = 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
+               trstplt ~~ trstprt
+               trust_soc =~ ppltrst + pplfair + pplhlp
+               trust_inst ~ hinctnta	+ happy + gndr + trust_soc'
+
+mimic_fit_moder <- sem(mimic_model,            
+              data = data_filtered , 
+              estimator = "MLR",
+              group = "cntry_grp",
+              missing = "direct"
+)
+
+summary(mimic_fit_moder,
+        standardized = TRUE)
+
+fitMeasures(mimic_fit_moder, c("chisq", "df", "pvalue", "cfi", "rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "srmr"), output = "matrix")
+
+
+# parameter estimates 
+parameters_mimic_multigroup = as.data.frame(parameterEstimates(mimic_fit_moder,
+                                                    standardized = TRUE))
+parameters_mimic_multigroup = parameters_mimic_multigroup %>% mutate(across(where(is.numeric), ~ round(., 3)))
+
+write.table(parameters_mimic_multigroup,
+            "parameters_mimic_std_mult.csv",
+            sep = ",")
+
+```
+
+
+# Part X: Plot them models 
+
+```{r }
+
+
+lay <- get_layout("happy", "gndr", "hinctnta", "", "ppltrst", 
+                  "", "trust_inst", "", "trust_soc",  "pplfair",
+                  "trstlgl", "trstplt", "trstprt", "trstplc", "pplhlp",
+                  rows = 3)
+
+
+mimic_plot = graph_sem(mimic_fit,
+          layout = lay,
+          angle = 170,
+          spacing_y = 3,
+          text_size = 4,
+          ellipses_width = 1,
+          ellipses_height = 1.5)
+
+
+# Save the plot 
+# library(Cairo)
+Cairo(600, 600, file="mimic_plot.png", type="png", bg="white")
+graph_sem(mimic_fit,
+          layout = lay,
+          angle = 170,
+          spacing_y = 3,
+          text_size = 4,
+          ellipses_width = 1,
+          ellipses_height = 1.5)
+dev.off() 
+
+
+
+```
