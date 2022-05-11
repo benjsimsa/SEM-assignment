@@ -2,7 +2,9 @@
 title: "SEM_final_project"
 author: "Benjamin Šimsa"
 date: "5/5/2022"
-output: html_document
+output: 
+  prettydoc::html_pretty:
+    theme: architect
 ---
 
 ```{r setup, include=FALSE}
@@ -18,7 +20,7 @@ Acknowledgment: Large portions of the following code were adapted from scripts w
 
 Import the packages, install if necessary 
 
-```{r silent = TRUE}
+```{r silent = TRUE, warning = FALSE, message = FALSE}
 packages <-lapply (c('tidyverse', 
                      'lavaan', 
                      'psych',
@@ -27,7 +29,8 @@ packages <-lapply (c('tidyverse',
                      'semTools',
                      'tidySEM',
                      'haven',
-                     'ggpubr'), 
+                     'ggpubr',
+                     'prettydoc'), 
         FUN = function (x) {
           if (! require (x, character.only = T)) {
             install.packages(x, dependencies = T)
@@ -109,7 +112,7 @@ descriptive_ess <- as.data.frame(psych::describe(data_full_todescribe))
 #            sep = ",")
 ```
 
-## How many **missing datapoints** for each variable / country group 
+## How many missing datapoints are there for each variable / country group 
 
 ```{r }
 data_w = data_filtered %>% 
@@ -151,11 +154,11 @@ na_count_total = data.frame(na_count_total)
 ```
 
 
-## Assumption check: Multivariate normality
+## Assumption check: Univariate normality of endogenous variables
 
 Plot each variable to visually assess univariate normality 
 
-```{r silent = TRUE}
+```{r silent = TRUE, message = FALSE, warning = FALSE}
 lgl_plot <- ggplot(data_filtered, aes(trstlgl)) +
         geom_blank() +
         geom_histogram(aes(y = ..density..), binwidth = 1, colour = "black", alpha=0.3) + theme_minimal() + xlab("Trust in legal system")
@@ -204,7 +207,7 @@ The data violate the univariate normality assumption (hence also the multivariat
 
 ## Simultaneous measurement model: Trust in institutions and Social trust
 
-```{r 1F model}
+```{r 1F model, message = FALSE, warning = FALSE}
 measurement_model <- 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
                       trust_soc =~ ppltrst + pplfair + pplhlp'
 
@@ -229,7 +232,7 @@ mi_measurement <- modificationIndices(measurement_fit)
 
 Out of the three modification suggestions with highest MI, allowing for trust in politicians and trust in political parties makes the most theoretical sense. Let us modify the model and assess model fit
 
-```{r }
+```{r warning = FALSE, message = FALSE}
 measurement_model_mod <-'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
                         trust_soc =~ ppltrst + pplfair + pplhlp
                         trstplt ~~ trstprt'
@@ -379,7 +382,7 @@ Still, we can see whether we can achieve at least partial structural invariance 
 ## Partial measurement invariance: Trust in institutions 
 
 
-```{r }
+```{r warning = FALSE, message = FALSE}
 lavTestScore(fit_inst_met)
 parTable(fit_inst_met)
 
@@ -442,7 +445,7 @@ The latent mean of Trust in institution is lower for ECE countries than for WE.
 
 ## Base MIMIC model
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 mimic_model = 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
                         trstplt ~~ trstprt
                         trust_soc =~ ppltrst + pplfair + pplhlp
@@ -464,18 +467,18 @@ fitMeasures(mimic_fit, c("chisq", "df", "pvalue", "cfi", "rmsea", "rmsea.ci.lowe
 # parameter estimates 
 parameters_mimic_std = as.data.frame(parameterEstimates(mimic_fit,
                                                     standardized = TRUE))
-parameters_mimic_std = parameters_mimic_std %>% mutate(across(where(is.numeric), ~ round(., 3)))
+(parameters_mimic_std = parameters_mimic_std %>% mutate(across(where(is.numeric), ~ round(., 3))))
 
-write.table(parameters_mimic_std,
-            "parameters_mimic_std.csv",
-            sep = ",")
+# write.table(parameters_mimic_std,
+#            "parameters_mimic_std.csv",
+#            sep = ",")
 
 ```
 
 
 # Part 5: Interaction between predictors and CEE 
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 mimic_model = 'trust_inst =~ trstlgl + trstplc + trstplt + trstprt
                trstplt ~~ trstprt
                trust_soc =~ ppltrst + pplfair + pplhlp
@@ -497,11 +500,12 @@ fitMeasures(mimic_fit_moder, c("chisq", "df", "pvalue", "cfi", "rmsea", "rmsea.c
 # parameter estimates 
 parameters_mimic_multigroup = as.data.frame(parameterEstimates(mimic_fit_moder,
                                                     standardized = TRUE))
-parameters_mimic_multigroup = parameters_mimic_multigroup %>% mutate(across(where(is.numeric), ~ round(., 3)))
 
-write.table(parameters_mimic_multigroup,
-            "parameters_mimic_std_mult.csv",
-            sep = ",")
+(parameters_mimic_multigroup = parameters_mimic_multigroup %>% mutate(across(where(is.numeric), ~ round(., 3)))
+)
+# write.table(parameters_mimic_multigroup,
+#            "parameters_mimic_std_mult.csv",
+#            sep = ",")
 
 ```
 
